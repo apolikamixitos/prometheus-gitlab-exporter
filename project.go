@@ -19,13 +19,29 @@ type ProjectStats struct {
 }
 
 type Project struct {
+	Id								int					 `json:"id"`
 	PathWithNamespace string       `json:"path_with_namespace"`
 	StarCount         int          `json:"star_count"`
 	ForkCount         int          `json:"fork_count"`
-	OpenIssueCount    int          `json:"openIssueCount"`
+	OpenIssueCount    int          `json:"open_issues_count"`
 	LastActivityAt    time.Time    `json:"last_activity_at"`
 	Statistics        ProjectStats `json:"statistics"`
+	MergeRequests			[]MergeRequest
 }
+
+type MergeRequest struct {
+	Title 				string   		 `json:"title"`
+	State 				string   		 `json:"state"`
+	MergeStatus   string   		 `json:"merge_status"`
+	TargetBranch  string   		 `json:"target_branch"`
+	CreatedAt    	time.Time    `json:"created_at"`
+	UpdatedAt    	time.Time    `json:"updated_at"`
+}
+
+func (project *Project) SetMergeRequests(mergeRequests []MergeRequest) {
+	project.MergeRequests = mergeRequests
+}
+
 
 /**
  *	Extracts the stats from a single project into a
@@ -44,9 +60,57 @@ func (project Project) PrometheusStats() string {
 	stats = fmt.Sprintf("%s\ngitlab_project_repository_size{repo=\"%s\"} %d", stats, path, project.Statistics.RepositorySize)
 	stats = fmt.Sprintf("%s\ngitlab_project_lfs_object_size{repo=\"%s\"} %d", stats, path, project.Statistics.LfsObjectSize)
 	stats = fmt.Sprintf("%s\ngitlab_project_job_artifacts_size{repo=\"%s\"} %d", stats, path, project.Statistics.JobArtifactsSize)
+
+	for _, mergeRequest := range project.MergeRequests {
+		stats = fmt.Sprintf("%s\ngitlab_project_merge_request{repo=\"%s\", state=\"%s\", merge_status=\"%s\", target_branch=\"%s\"} 1", stats, path, mergeRequest.State, mergeRequest.MergeStatus, mergeRequest.TargetBranch)
+	}
+
 	stats = fmt.Sprintf("%s\ngitlab_project_last_activity{repo=\"%s\"} %d", stats, path, project.LastActivityAt.Unix())
 	return stats
 }
+
+/**
+ *	Fetches all merge requests from a specific project id.
+ *
+ *	@return A list of all merge requests known to the current gitlab project
+ */
+ func (project Project) GetMergeRequests(gitlabUrl string, token string) []MergeRequest {
+	merge_requests := make([]MergeRequest, 0)
+	page := 1
+	
+	for true {
+		// Fetch a page from the API.
+		mergesUrl := fmt.Sprintf("%s/api/v4/projects/%d/merge_requests?private_token=%s&per_page=100&statistics=1&page=%d", gitlabUrl, project.Id, token, page)
+		log.Printf("Requesting %s\n", mergesUrl)
+		response, error := http.Get(mergesUrl)
+		if error != nil {
+			log.Fatalf(error.Error())
+		}
+
+		// Merge the results back to the complete array.
+		mergesInPage := make([]MergeRequest, 0)
+		error = json.NewDecoder(response.Body).Decode(&mergesInPage)
+		if error != nil {
+			log.Fatalf(error.Error())
+		}
+		merge_requests = append(merge_requests, mergesInPage...)
+
+		// Parse the X-Next-Page Header in order to figure out
+		// if another page should be requested.
+		// If not, then return the current merge requests.
+		pageHeader := response.Header["X-Next-Page"][0]
+		if pageHeader == "" {
+			return merge_requests
+		}
+		page, error = strconv.Atoi(pageHeader)
+		if error != nil {
+			log.Fatalf(error.Error())
+		}
+	}
+
+	return merge_requests
+}
+
 
 /**
  *	Fetches all projects from the configured gitlab endpoint.
@@ -72,8 +136,13 @@ func GetRepositories(gitlabUrl string, token string) []Project {
 		if error != nil {
 			log.Fatalf(error.Error())
 		}
-		projects = append(projects, projectsInPage...)
 
+		for i := range projectsInPage {
+			merge_requests := projectsInPage[i].GetMergeRequests(gitlabUrl, token)
+			projectsInPage[i].SetMergeRequests(merge_requests)
+		}
+		
+		projects = append(projects, projectsInPage...)		
 		// Parse the X-Next-Page Header in order to figure out
 		// if another page should be requested.
 		// If not, then return the current projects.
