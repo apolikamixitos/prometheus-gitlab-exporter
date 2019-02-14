@@ -30,6 +30,7 @@ type Project struct {
 }
 
 type MergeRequest struct {
+	Id            int					 `json:"id"`
 	Title 				string   		 `json:"title"`
 	State 				string   		 `json:"state"`
 	MergeStatus   string   		 `json:"merge_status"`
@@ -62,7 +63,7 @@ func (project Project) PrometheusStats() string {
 	stats = fmt.Sprintf("%s\ngitlab_project_job_artifacts_size{repo=\"%s\"} %d", stats, path, project.Statistics.JobArtifactsSize)
 
 	for _, mergeRequest := range project.MergeRequests {
-		stats = fmt.Sprintf("%s\ngitlab_project_merge_request{repo=\"%s\", state=\"%s\", merge_status=\"%s\", target_branch=\"%s\"} 1", stats, path, mergeRequest.State, mergeRequest.MergeStatus, mergeRequest.TargetBranch)
+		stats = fmt.Sprintf("%s\ngitlab_project_merge_request{repo=\"%s\", merge_id=\"%d\", state=\"%s\", merge_status=\"%s\", target_branch=\"%s\"} 1", stats, path, mergeRequest.Id, mergeRequest.State, mergeRequest.MergeStatus, mergeRequest.TargetBranch)
 	}
 
 	stats = fmt.Sprintf("%s\ngitlab_project_last_activity{repo=\"%s\"} %d", stats, path, project.LastActivityAt.Unix())
